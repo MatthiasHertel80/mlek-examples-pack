@@ -1,0 +1,30 @@
+cbuild-pack:
+  resolved-packs:
+    - resolved-pack: ARM::CMSIS@6.1.0
+      selected-by-pack:
+        - ARM::CMSIS
+        - ARM::CMSIS@6.1.0
+    - resolved-pack: ARM::CMSIS-DSP@1.16.0
+      selected-by-pack:
+        - ARM::CMSIS-DSP@1.16.0
+    - resolved-pack: ARM::CMSIS-NN@7.0.0
+      selected-by-pack:
+        - ARM::CMSIS-NN@7.0.0
+    - resolved-pack: ARM::CMSIS-RTX@5.9.0
+      selected-by-pack:
+        - ARM::CMSIS-RTX@5.9.0
+    - resolved-pack: ARM::SSE_315_BSP@1.0.0
+      selected-by-pack:
+        - ARM::SSE_315_BSP@1.0.0
+    - resolved-pack: ARM::SSE_320_BSP@1.0.0
+      selected-by-pack:
+        - ARM::SSE_320_BSP@1.0.0
+    - resolved-pack: ARM::V2M_MPS3_SSE_300_BSP@1.5.0
+      selected-by-pack:
+        - ARM::V2M_MPS3_SSE_300_BSP@1.5.0
+    - resolved-pack: ARM::V2M_MPS3_SSE_310_BSP@1.4.0
+      selected-by-pack:
+        - ARM::V2M_MPS3_SSE_310_BSP@1.4.0
+    - resolved-pack: ARM::ml-embedded-eval-kit-uc-api@24.8.0
+      selected-by-pack:
+        - ARM::ml-embedded-eval-kit-uc-api@24.8.0

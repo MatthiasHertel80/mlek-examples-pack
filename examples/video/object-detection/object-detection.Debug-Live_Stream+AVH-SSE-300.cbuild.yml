@@ -1,0 +1,41 @@
+build:
+  generated-by: csolution version 2.9.0
+  solution: ../mlek_video.csolution.yml
+  project: object-detection.cproject.yml
+  context: object-detection.Debug-Live_Stream+AVH-SSE-300
+  compiler: AC6
+  optimize: debug
+  debug: on
+  misc:
+    C:
+      - -std=c17
+      - -Wno-license-management
+    CPP:
+      - -std=c++17
+      - -fno-exceptions
+      - -fno-rtti
+      - -ffp-mode=full
+      - -Wno-license-management
+    Link:
+      - --entry=Reset_Handler
+      - --verbose
+      - --callgraph_file='callgraph'
+      - --map
+      - --info=sizes,totals,unused,compression,inline,summarysizes
+      - --list='diagnostics.map'
+      - --diag_suppress=L6439W,L6314W,L9931W
+  define:
+    - ACTIVATION_BUF_SZ: 532480
+    - CORSTONE300_FVP
+    - ARM_MODEL_USE_PMU_COUNTERS
+  add-path:
+    - include
+  output-dirs:
+    intdir: ../tmp
+    outdir: ../out/object-detection/AVH-SSE-300/Debug-Live_Stream
+    rtedir: RTE
+  output:
+    - type: bin
+      file: object-detection.bin
+    - type: elf
+      file: object-detection.axf

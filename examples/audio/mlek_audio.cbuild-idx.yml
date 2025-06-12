@@ -1,0 +1,38 @@
+build-idx:
+  generated-by: csolution version 2.9.0
+  cdefault: cdefault.yml
+  csolution: mlek_audio.csolution.yml
+  tmpdir: tmp
+  cprojects:
+    - cproject: kws/kws.cproject.yml
+      clayers:
+        - clayer: kws/$Board-Layer$
+  cbuilds:
+    - cbuild: kws/kws.Debug-Live_Stream+AVH-SSE-300.cbuild.yml
+      project: kws
+      configuration: .Debug-Live_Stream+AVH-SSE-300
+      clayers:
+        - clayer: board/Corstone-300/Board.clayer.yml
+      errors: true
+      messages:
+        errors:
+          - "required pack: ARM::ethos-u-core-driver@1.24.11 not installed"
+          - "required pack: tensorflow::flatbuffers@1.24.11 not installed"
+          - "required pack: tensorflow::gemmlowp@1.24.11 not installed"
+          - "required pack: tensorflow::kissfft@1.24.11 not installed"
+          - "required pack: tensorflow::ruy@1.24.11 not installed"
+          - "required pack: tensorflow::tensorflow-lite-micro@1.24.11 not installed"
+          - board 'ARM::V2M-MPS3-SSE-300-FVP' was not found
+          - processing context 'kws.Debug-Live_Stream+AVH-SSE-300' failed
+        warnings:
+          - no compiler registered. Add path to compiler 'bin' directory with environment variable <name>_TOOLCHAIN_<major>_<minor>_<patch>. <name> is one of AC6, GCC, IAR, CLANG
+        info:
+          - mlek_audio.cbuild-pack.yml - file is already up-to-date
+          - kws.Debug-Live_Stream+AVH-SSE-300.cbuild.yml - file is already up-to-date
+      packs-missing:
+        - pack: ARM::ethos-u-core-driver@1.24.11
+        - pack: tensorflow::flatbuffers@1.24.11
+        - pack: tensorflow::gemmlowp@1.24.11
+        - pack: tensorflow::kissfft@1.24.11
+        - pack: tensorflow::ruy@1.24.11
+        - pack: tensorflow::tensorflow-lite-micro@1.24.11

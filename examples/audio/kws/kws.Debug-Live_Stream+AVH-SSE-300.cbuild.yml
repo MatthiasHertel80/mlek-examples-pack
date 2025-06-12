@@ -1,0 +1,41 @@
+build:
+  generated-by: csolution version 2.9.0
+  solution: ../mlek_audio.csolution.yml
+  project: kws.cproject.yml
+  context: kws.Debug-Live_Stream+AVH-SSE-300
+  compiler: AC6
+  optimize: debug
+  debug: on
+  misc:
+    C:
+      - -std=c17
+      - -Wno-license-management
+    CPP:
+      - -std=c++17
+      - -fno-exceptions
+      - -fno-rtti
+      - -ffp-mode=full
+      - -Wno-license-management
+    Link:
+      - --entry=Reset_Handler
+      - --verbose
+      - --callgraph_file='callgraph'
+      - --map
+      - --info=sizes,totals,unused,compression,inline,summarysizes
+      - --list='diagnostics.map'
+      - --diag_suppress=L6439W,L6314W,L9931W
+  define:
+    - ACTIVATION_BUF_SZ: 131072
+    - CORSTONE300_FVP
+    - ARM_MODEL_USE_PMU_COUNTERS
+  add-path:
+    - include
+  output-dirs:
+    intdir: ../tmp
+    outdir: ../out/kws/AVH-SSE-300/Debug-Live_Stream
+    rtedir: RTE
+  output:
+    - type: bin
+      file: kws.bin
+    - type: elf
+      file: kws.axf
