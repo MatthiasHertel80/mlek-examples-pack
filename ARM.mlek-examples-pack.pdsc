@@ -8,13 +8,13 @@
   <license>LICENSE.txt</license>
 
   <releases>
-    <release version="0.0.0">
+    <release version="0.0.2">
       Initial Draft 
     </release>
   </releases>
 
   <examples>
-    <example name="Keyword Spotting and User Algorithm Template" folder="example/audio" doc="./examples/audio/README.md">
+    <example name="Keyword Spotting and User Algorithm Template" folder="examples/audio" doc="README.md">
       <description></description>
       <project>
         <environment name="csolution" load="mlek_audio.csolution.yml"/>
@@ -25,7 +25,7 @@
       </attributes>
     </example>
 
-    <example name="Object Detection and User Algorithm Template" folder="examples/video" doc="./examples/video/README.md">
+    <example name="Object Detection and User Algorithm Template" folder="examples/video" doc="README.md">
       <description></description>
       <project>
         <environment name="csolution" load="mlek_video.csolution.yml"/>

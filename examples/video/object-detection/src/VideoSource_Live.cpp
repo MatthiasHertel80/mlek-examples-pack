@@ -19,141 +19,123 @@
 #include <cstdint>
 #include <cstring>
 
-#include "VideoSource.hpp" 
-#include "video_drv.h"
+#include "VideoConfiguration.hpp"
+#include "VideoSource.hpp"
+#include "BufAttributes.hpp"
+
+#include "image_processing_func.h"
+#include "cmsis_vstream.h"
 #include "cmsis_os2.h"
 
 #include "log_macros.h"
 
-#define IMAGE_WIDTH     192
-#define IMAGE_HEIGHT    192
-#define IMAGE_SIZE      (IMAGE_WIDTH * IMAGE_HEIGHT * 3)
 
-/* Draws a box with the specified coordinates */
+/* Reference to the underlying CMSIS vStream VideoIn driver */
+extern vStreamDriver_t          Driver_vStreamVideoIn;
+#define vStream_VideoIn       (&Driver_vStreamVideoIn)
+
+/* Reference to the underlying CMSIS vStream VideoOut driver */
+extern vStreamDriver_t          Driver_vStreamVideoOut;
+#define vStream_VideoOut      (&Driver_vStreamVideoOut)
+
+/* Camera frame buffer (RAW8 or RGB565) */
+static uint8_t CAM_Frame[CAMERA_FRAME_SIZE] CAMERA_FRAME_BUF_ATTRIBUTE;
+
+/* RGB image buffer (RGB888) */
+static uint8_t RGB_Image[RGB_IMAGE_SIZE] RGB_IMAGE_BUF_ATTRIBUTE;
+
+/* ML image buffer (RGB888) */
+static uint8_t ML_Image[ML_IMAGE_SIZE] ML_IMAGE_BUF_ATTRIBUTE;
+
+/* Display frame buffer (RGB888) */
+static uint8_t LCD_Frame[DISPLAY_IMAGE_SIZE] DISPLAY_FRAME_BUF_ATTRIBUTE;
+
 static void DrawBox(uint8_t *imageData, const uint32_t x0, const uint32_t y0, const uint32_t w, const uint32_t h);
-
-/* RGB image buffer - cropped/scaled version of the original + debayered. */
-static uint8_t inImage[IMAGE_SIZE];
-
-/* LCD image buffer */
-static uint8_t outImage[IMAGE_SIZE];
+static void convert_frame_to_rgb(uint8_t *inFrame);
 
 osThreadId_t tid_app_main = NULL;
-osThreadId_t tid_video_capture = NULL;
 
-void VideoDrv_Event_Callback (uint32_t channel, uint32_t event) {
-    (void)channel;
+uint8_t VideoIn_Ready = 0U;
+uint8_t VideoOut_Ready = 0U;
+
+uint32_t EventCnt_VideoIn = 0U;
+uint32_t EventCnt_VideoOut = 0U;
+
+/* Video In Stream Event Callback */
+void VideoIn_Event_Callback (uint32_t event) {
     (void)event;
 
-    osThreadFlagsSet(tid_video_capture, 0x0001);
+    if (event & VSTREAM_EVENT_DATA) {
+        /* Video frame is available in camera frame buffer */
+        osThreadFlagsSet(tid_app_main, 0x1);
+    }
+    EventCnt_VideoIn++;
 }
 
-/**
-    Capture video frames and output them to the display
-*/
-void video_capture (void *arg) {
-    VideoDrv_Status_t status;
+/* Video Out Stream Event Callback */
+void VideoOut_Event_Callback (uint32_t event) {
+    (void)event;
 
-    /* Initialize Video Interface */
-    if (VideoDrv_Initialize(NULL) != VIDEO_DRV_OK) {
-        printf_err("Failed to initialise video driver\n");
-        return;
-    }
-
-    /* Configure Input Video */
-    if (VideoDrv_Configure(VIDEO_DRV_IN0,  IMAGE_WIDTH, IMAGE_HEIGHT, VIDEO_DRV_COLOR_RGB888, 60U) != VIDEO_DRV_OK) {
-        printf_err("Failed to configure video input\n");
-        return;
-    }
-    /* Configure Output Video */
-    if (VideoDrv_Configure(VIDEO_DRV_OUT0, IMAGE_WIDTH, IMAGE_HEIGHT, VIDEO_DRV_COLOR_RGB888, 60U) != VIDEO_DRV_OK) {
-        printf_err("Failed to configure video output\n");
-        return;
-    }
-
-    /* Set Input Video buffer */
-    if (VideoDrv_SetBuf(VIDEO_DRV_IN0, inImage, IMAGE_SIZE) != VIDEO_DRV_OK) {
-        printf_err("Failed to set buffer for video input\n");
-        return;
-    }
-    /* Set Output Video buffer */
-    if (VideoDrv_SetBuf(VIDEO_DRV_OUT0, outImage, IMAGE_SIZE) != VIDEO_DRV_OK) {
-        printf_err("Failed to set buffer for video output\n");
-        return;
-    }
-
-    /* Start video capture (single frame) */
-    if (VideoDrv_StreamStart(VIDEO_DRV_IN0, VIDEO_DRV_MODE_SINGLE) != VIDEO_DRV_OK) {
-        printf_err("Failed to start video capture\n");
-        return;
-    }
-
-    void *inFrame;
-    void *outFrame;
-
-    while(1) {
-        /* Wait for flag from video callback */
-        osThreadFlagsWait(0x0001, osFlagsWaitAny, osWaitForever);
-
-        /* Get input video frame buffer */
-        inFrame = VideoDrv_GetFrameBuf(VIDEO_DRV_IN0);
-
-        /* Wait for video output frame to be released */
-        do {
-            status = VideoDrv_GetStatus(VIDEO_DRV_OUT0);
-        } while (status.buf_full != 0U);
-
-        /* Get output video frame buffer */
-        outFrame = VideoDrv_GetFrameBuf(VIDEO_DRV_OUT0);
-
-        /* Copy image frame */
-        memcpy(outFrame, inFrame, IMAGE_SIZE);
-
-        /* Release input frame */
-        VideoDrv_ReleaseFrame(VIDEO_DRV_IN0);
-
-        /* Start video capture (single frame) */
-        if (VideoDrv_StreamStart(VIDEO_DRV_IN0, VIDEO_DRV_MODE_SINGLE) != VIDEO_DRV_OK) {
-            printf_err("Failed to start video capture\n");
-            return;
-        }
-
-        /* Buffer is ready, start processing it */
-        osThreadFlagsSet(tid_app_main, 0x0001);
-    }
+    EventCnt_VideoOut++;
 }
 
 bool open_img_source(const uint32_t idx)
 {
-    osThreadAttr_t const attr = {NULL, 0, NULL, 0, NULL, 0, osPriorityHigh, 0, 0};
-    uint32_t flags;
-    VideoDrv_Status_t status;
+    uint8_t *inFrame;
+    uint8_t *outFrame;
+    vStreamStatus_t status;
 
-    if (tid_video_capture == NULL) {
-        /* Get application thread ID */
-        tid_app_main = osThreadGetId();
+    tid_app_main = osThreadGetId();
 
-        /* Create video capture thread */
-        tid_video_capture = osThreadNew(video_capture, NULL, &attr);
+    if (VideoIn_Ready == 0U) {
+        /* Initialize Video Input Stream */
+        if (vStream_VideoIn->Initialize(VideoIn_Event_Callback) != VSTREAM_OK) {
+            printf_err("Failed to initialise video input driver\n");
+            return false;
+        }
+
+        /* Set Input Video buffer */
+        if (vStream_VideoIn->SetBuf(CAM_Frame, sizeof(CAM_Frame), CAMERA_FRAME_SIZE) != VSTREAM_OK) {
+            printf_err("Failed to set buffer for video input\n");
+            return false;
+        }
+
+        VideoIn_Ready = 1U;
     }
 
-    // #if POOLING
-    /* Wait for video input frame */
-    do {
-        status = VideoDrv_GetStatus(VIDEO_DRV_IN0);
-    } while (status.buf_empty != 0U);
-
-    if (status.buf_empty == 0U) {
-        osThreadFlagsSet(tid_video_capture, 0x0001);
-    }
-    // #endif
-
-    /* Wait for flag from video capture thread (2 sec timeout) */
-    flags = osThreadFlagsWait(0x0001, osFlagsWaitAny, 2000);
-
-    if (flags == osFlagsErrorTimeout) {
-        /* Capture thread did not set the event */
+    /* Start video capture */
+    if (vStream_VideoIn->Start(VSTREAM_MODE_SINGLE) != VSTREAM_OK) {
+        printf_err("Failed to start video capture\n");
         return false;
+    }
+
+
+    /* Wait for new video input frame */
+    osThreadFlagsWait(0x1, osFlagsWaitAny, osWaitForever);
+
+    /* Get input video frame buffer */
+    inFrame = (uint8_t *)vStream_VideoIn->GetBlock();
+    if (inFrame == NULL) {
+        printf_err("Failed to get video input frame\n");
+        return false;
+    }
+
+    /* Convert input frame and place it into RGB_Image buffer */
+    convert_frame_to_rgb(inFrame);
+
+    /* Resize RGB image to fit ML model expected size */
+    image_resize(RGB_Image,
+                 RGB_IMAGE_WIDTH,
+                 RGB_IMAGE_HEIGHT,
+                 (uint8_t *)ML_Image,
+                 ML_IMAGE_WIDTH,
+                 ML_IMAGE_HEIGHT,
+                 IMAGE_FORMAT_RGB888,
+                 IMAGE_FORMAT_RGB888);
+
+    /* Release input frame */
+    if (vStream_VideoIn->ReleaseBlock() != VSTREAM_OK) {
+        printf_err("Failed to release video input frame\n");
     }
 
     return true;
@@ -161,11 +143,57 @@ bool open_img_source(const uint32_t idx)
 
 void close_img_source(const uint32_t idx)
 {
-    /* Release output frame */
-    VideoDrv_ReleaseFrame(VIDEO_DRV_OUT0);
+    vStreamStatus_t status;
+    uint8_t *outFrame;
 
-    /* Start video output (single frame) */
-    VideoDrv_StreamStart(VIDEO_DRV_OUT0, VIDEO_DRV_MODE_SINGLE);
+    if (VideoOut_Ready == 0U) {
+        /* Initialize Video Output Stream */
+        if (vStream_VideoOut->Initialize(VideoOut_Event_Callback) != VSTREAM_OK) {
+            printf_err("Failed to initialise video output driver\n");
+            return;
+        }
+
+        /* Set Output Video buffer */
+        if (vStream_VideoOut->SetBuf(LCD_Frame, sizeof(LCD_Frame), DISPLAY_IMAGE_SIZE) != VSTREAM_OK) {
+            printf_err("Failed to set buffer for video output\n");
+            return;
+        }
+
+        VideoOut_Ready = 1U;
+    }
+
+    /* Wait for video output frame to be released */
+    do {
+        status = vStream_VideoOut->GetStatus();
+    } while (status.active == 1U);
+
+    /* Get output frame */
+    outFrame = (uint8_t *)vStream_VideoOut->GetBlock();
+    if (outFrame == NULL) {
+        printf_err("Failed to get video output frame\n");
+        return;
+    }
+
+    /* Copy ML image into the display frame buffer */
+    image_copy_to_framebuffer(ML_Image,
+                              ML_IMAGE_WIDTH,
+                              ML_IMAGE_HEIGHT,
+                              outFrame,
+                              DISPLAY_FRAME_WIDTH,
+                              DISPLAY_FRAME_HEIGHT,
+                             (DISPLAY_FRAME_WIDTH - ML_IMAGE_WIDTH) / 2,
+                             (DISPLAY_FRAME_HEIGHT - ML_IMAGE_HEIGHT)/2,
+                             IMAGE_FORMAT_RGB888);
+
+    /* Release output frame */
+    if (vStream_VideoOut->ReleaseBlock() != VSTREAM_OK) {
+        printf_err("Failed to release video output frame\n");
+    }
+
+    /* Start video output */
+    if (vStream_VideoOut->Start(VSTREAM_MODE_SINGLE) != VSTREAM_OK) {
+        printf_err("Failed to start video output\n");
+    }
 }
 
 const char* get_filename(const uint32_t idx)
@@ -175,18 +203,18 @@ const char* get_filename(const uint32_t idx)
 
 const uint8_t* get_img_array(const uint32_t idx)
 {
-    return outImage;
+    return ML_Image;
 }
 
 uint32_t get_img_array_size(const uint32_t idx)
 {
     /* Return image array size in bytes */
-    return sizeof(outImage);
+    return sizeof(ML_Image);
 }
 
 void set_img_object_box(const uint32_t idx, const uint32_t x0, const uint32_t y0, const uint32_t w, const uint32_t h) {
     /* Draw a box around detected object */
-    DrawBox(outImage, x0, y0, w, h);
+    DrawBox(ML_Image, x0, y0, w, h);
 }
 
 /**
@@ -199,7 +227,7 @@ void set_img_object_box(const uint32_t idx, const uint32_t x0, const uint32_t y0
  */
 static void DrawBox(uint8_t *imageData, const uint32_t x0, const uint32_t y0, const uint32_t w, const uint32_t h)
 {
-    const uint32_t step = IMAGE_WIDTH * 3;
+    const uint32_t step = ML_IMAGE_WIDTH * 3;
     uint8_t* const imStart = imageData + (y0 * step) + (x0 * 3);
 
     uint8_t* dst_0 = imStart;
@@ -223,4 +251,94 @@ static void DrawBox(uint8_t *imageData, const uint32_t x0, const uint32_t y0, co
         dst_0 += step;
         dst_1 += step;
     }
+}
+
+/*
+  Converts camera frame and copies it to RGB image buffer.
+
+  Camera frame may be square or non-square and must be in RAW8 or RGB565 format.
+  RGB image buffer is always square and is in RGB888 format.
+
+  The function handles the following cases:
+    - If the camera frame is square and matches the RGB image size:
+      - crop and debayer the RAW8 camera frame
+      - convert RGB565 camera frame to RGB888
+    - If the camera frame is square and larger than the RGB image size:
+      - crop and debayer the RAW8 camera frame
+      - resize RGB565 camera frame to fit into RGB image buffer.
+    - If the camera frame is not square:
+      - crop and debayer the RAW8 camera frame
+      - crops RGB565 camera frame to fit into RGB image buffer.
+*/
+static void convert_frame_to_rgb(uint8_t *inFrame) {
+    #if (CAMERA_FRAME_WIDTH == CAMERA_FRAME_HEIGHT)
+      /* Camera frame is square */
+      #if (CAMERA_FRAME_WIDTH == RGB_IMAGE_WIDTH) && (CAMERA_FRAME_HEIGHT == RGB_IMAGE_HEIGHT)
+        /* Camera frame size matches RGB image size */
+        #if (CAMERA_FRAME_TYPE == CAMERA_FRAME_TYPE_RAW8)
+            /* For RAW8, crop and debayer into RGB image buffer (RGB888) */
+            crop_and_debayer(inFrame,
+                            CAMERA_FRAME_WIDTH,
+                            CAMERA_FRAME_HEIGHT,
+                            0, 0, /* Crop from top-left corner */
+                            RGB_Image,
+                            RGB_IMAGE_WIDTH,
+                            RGB_IMAGE_HEIGHT,
+                            CAMERA_FRAME_BAYER);
+        #else
+            /* For RGB565, convert frame to fit into RGB image buffer (RGB888) */
+            convert_rgb565_to_rgb888(inFrame, RGB_Image, CAMERA_FRAME_WIDTH, CAMERA_FRAME_HEIGHT);
+        #endif
+      #else
+        /* Camera frame size is larger than RGB image size */
+        #if (CAMERA_FRAME_TYPE == CAMERA_FRAME_TYPE_RAW8)
+            /* For RAW8, crop and debayer into RGB image buffer (RGB888) */
+            crop_and_debayer(inFrame,
+                            CAMERA_FRAME_WIDTH,
+                            CAMERA_FRAME_HEIGHT,
+                            (CAMERA_FRAME_WIDTH - RGB_IMAGE_WIDTH) / 2, /* Center crop */
+                            (CAMERA_FRAME_HEIGHT - RGB_IMAGE_HEIGHT) / 2,
+                            RGB_Image,
+                            RGB_IMAGE_WIDTH,
+                            RGB_IMAGE_HEIGHT,
+                            CAMERA_FRAME_BAYER);
+        #else
+            /* For RGB565, resize frame to fit into RGB image buffer (RGB888) */
+            image_resize(inFrame,
+                        CAMERA_FRAME_WIDTH,
+                        CAMERA_FRAME_HEIGHT,
+                        RGB_Image,
+                        RGB_IMAGE_WIDTH,
+                        RGB_IMAGE_HEIGHT,
+                        IMAGE_FORMAT_RGB565,
+                        IMAGE_FORMAT_RGB888);
+        #endif
+      #endif
+    #endif
+
+    #if (CAMERA_FRAME_WIDTH != CAMERA_FRAME_HEIGHT)
+      /* Camera frame is not square, crop it to fit RGB buffer */
+      #if (CAMERA_FRAME_TYPE == CAMERA_FRAME_TYPE_RAW8)
+        /* For RAW8, crop and debayer to RGB888 */
+        crop_and_debayer(inFrame,
+                        CAMERA_FRAME_WIDTH,
+                        CAMERA_FRAME_HEIGHT,
+                        (CAMERA_FRAME_WIDTH - RGB_IMAGE_WIDTH) / 2, /* Center crop */
+                        (CAMERA_FRAME_HEIGHT - RGB_IMAGE_HEIGHT) / 2,
+                        RGB_Image,
+                        RGB_IMAGE_WIDTH,
+                        RGB_IMAGE_HEIGHT,
+                        CAMERA_FRAME_BAYER);
+      #else
+        /* For RGB565, crop and convert to RGB888 */
+        crop_rgb565_to_rgb888(inFrame,
+                            CAMERA_FRAME_WIDTH,
+                            CAMERA_FRAME_HEIGHT,
+                            RGB_Image,
+                            (CAMERA_FRAME_WIDTH - RGB_IMAGE_WIDTH) / 2, /* Center crop */
+                            (CAMERA_FRAME_HEIGHT - RGB_IMAGE_HEIGHT) / 2,
+                            RGB_IMAGE_WIDTH,
+                            RGB_IMAGE_HEIGHT);
+      #endif
+    #endif
 }
